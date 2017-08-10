@@ -1,0 +1,204 @@
+/**
+ * Response for rollback debit request
+ * -----------------------------------
+ * flpc:2017.08.07
+ */
+function(request, state, logger) {
+
+  /**
+   * Utility function to generate error response
+   */
+  function genRollbackError (status, code, title, detail, source) {
+    let body = {
+      'errors': [ 
+        {
+          'code': code,
+          'title': title,
+          'detail': detail,
+          'source': source
+        }
+      ]
+    }
+
+    logger.info('Error: ', JSON.stringify(body))
+    return {
+      statusCode: status,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * Generate refund response
+   */
+  function genRollbackResponse(trxid, amount, balance) {
+    let body = {
+      'data': {
+        'refunds': [
+          {
+            'id': trxid,
+            'amount': amount,
+            'date': m().format(),
+            'wallet': {
+              'balance': balance
+            }
+          }
+        ]
+      }
+    } 
+    logger.info('Response: ', JSON.stringify(body, 2))
+    return {
+      statusCode: 201,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * load moment-timezone package
+   */
+  let m = require('moment-timezone')  
+
+  /**
+   * Initialise tokens object if not defined yet
+   */
+  if (state.tokens == undefined) {
+    state.tokens = []
+  }
+  /**
+   * Initialise users object if not defined yet
+   */
+  if (state.users == undefined) {
+    state.users = []
+  }
+  
+  /**
+   * Initialise transaction number and transaction log
+   */
+  state.trxid = state.trxid || 1000000000
+  if (state.transactions == undefined) {
+    state.transactions = []
+  }
+
+  /**
+   * log type of API call and 'Authorization' header 
+   */
+  logger.info('Rollback debit called')
+  logger.info('Authorization:', request.headers['Authorization'])
+
+  /**
+   * Extract the token used as the last word in the 'Authorization'. 
+   * This can handle a string with or without the 'Bearer' in front of it.
+   */
+  let sessionToken = request.headers['Authorization'].split(" ").slice(-1)[0]
+
+  /**
+   * Extract user id, debit reference id and ref id
+   */
+  let userid = request.path.split("/")[5]
+  logger.info("Userid: ", userid)
+  let debitRefId = request.query['reference']
+  logger.info("Debit Reference ID: ", debitRefId)
+  let ref_id = request.headers['X-Request-ID']
+  logger.info("Reference ID: ", ref_id)
+
+  /**
+   * Log session token
+   */
+  logger.info('Session token: ', sessionToken)
+
+  /**
+   * Test if session token is valid
+   */
+  if (state.users[sessionToken] == undefined) {
+    logger.info('Invalid session token')
+    return (genRollbackError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: 'Authorization='+sessionToken }))
+  }
+
+  /**
+   * Test if the X-Request-ID was used for a different transaction type
+   */
+  let trx = state.transactions[ref_id]
+  if (trx) {
+    if (trx.trxtype == 'CANCELDEBIT' && trx.debit_ref_id == debitRefId) {
+      logger.info('Idempotent rollback invocation for reference id: ', ref_id)
+      logger.info('Transaction: ', JSON.stringify(trx))
+      return genRollbackResponse(trx.trans_id, trx.amount, trx.balance)
+    } else {
+      logger.info('Invalid request parameter: reference id already used and data do not match')
+      logger.info('Transaction: ', JSON.stringify(trx))
+      return (genRollbackError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: 'X-Request-ID='+ref_id }))
+    }
+  }
+
+  /**
+   * Test if there is a debit transaction associate with the debit reference id
+   */
+  trx = state.transactions[debitRefId]
+  if (trx == undefined) {
+    /**
+     * No transaction found
+     */
+    logger.info('Invalid request parameter: no debit transaction found for reference id ' + debitRefId)
+    return (genRollbackError(204, 200, 'Debit transaction not found', request.method+' '+request.path, { parameter: debitRefId }))   
+  }
+
+  /**
+   * Test if the debit reference id points to a valid 'DEBIT' transaction
+   */
+  if (trx.trxtype != 'DEBIT') {
+    logger.info('Invalid request parameter: debit reference id points to non-DEBIT transaction')
+    return (genRollbackError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: debitRefId }))
+  }
+
+  /**
+  * Test if the debit transaction for the debit transaction id has not been processed yet, that is, trx.match_ref_id is not defined
+  */
+  if (trx.match_ref_id) {
+    let status = ((state.transactions[trx.match_ref_id].trxtype == 'CREDIT') ? 'paid' : 'cancelled')
+    logger.info('Invalid request parameter: debit transaction id points to a DEBIT transaction that has been ' + status + ' already')
+    logger.info('Debit transaction ' + status + ': ', JSON.stringify(trx))
+    return (genRollbackError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: debitRefId }))
+  }
+
+  /**
+  * Assign this credit reference id to the matching reference id of the debit transaction
+  */
+  trx.match_ref_id = ref_id
+    
+  /**
+   * Credit wallet balance with the original amount of the debit recorded
+   */
+  state.users[sessionToken].balance = Math.round((state.users[sessionToken].balance + trx.amount) * 100)/100
+
+  /**
+   * Log transaction
+   */
+  state.transactions[ref_id] = state.transactions[state.trxid] = {
+    reference_id: ref_id,
+    trans_id: state.trxid++,
+    user_id: state.users[sessionToken].id,
+    game_id: trx.game_id,
+    provider_id: trx.provider_id,
+    amount: trx.amount,
+    balance: state.users[sessionToken].balance,
+    trxtype: 'CANCELDEBIT',
+    debit_ref_id: trx.reference_id,
+    debit_trans_id: trx.trans_id
+  } 
+  logger.info('Transaction: ', JSON.stringify(state.transactions[ref_id],2)) 
+
+  /**
+   * Generate mock response
+   */
+  trx = state.transactions[ref_id]
+  return genRollbackResponse(trx.trans_id, trx.amount, trx.balance)
+}

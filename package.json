@@ -1,0 +1,19 @@
+{
+  "name": "instant-play-mock",
+  "version": "0.0.1",
+  "description": "Instant play mock service",
+  "main": "index.js",
+  "scripts": {
+    "start:instant-play:mock": "mb --configfile instant-play-imposter.ejs --allowInjection"
+  },
+  "keywords": [
+    "instant",
+    "play",
+    "mock"
+  ],
+  "author": "flpc",
+  "license": "ISC",
+  "dependencies": {
+    "moment-timezone": "^0.5.13"
+  }
+}

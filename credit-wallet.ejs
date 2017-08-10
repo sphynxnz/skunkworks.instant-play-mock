@@ -1,0 +1,204 @@
+/**
+ * Response for credit wallet request
+ * ---------------------------------
+ * flpc:2017.08.07
+ */
+function(request, state, logger) {
+
+  /**
+   * Utility function to generate error response
+   */
+  function genCreditError (status, code, title, detail, source) {
+    let body = {
+      'errors': [ 
+        {
+          'code': code,
+          'title': title,
+          'detail': detail,
+          'source': source
+        }
+      ]
+    }
+
+    logger.info('Error: ', JSON.stringify(body))
+    return {
+      statusCode: status,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * Generate debit response
+   */
+  function genCreditResponse(trxid, amount, balance) {
+    let body = {
+      'data': {
+        'credits': [
+          {
+            'id': trxid,
+            'amount': amount,
+            'date': m().format(),
+            'wallet': {
+              'balance': balance
+            }
+          }
+        ]
+      }
+    } 
+    logger.info('Response: ', JSON.stringify(body, 2))
+    return {
+      statusCode: 201,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * load moment-timezone package
+   */
+  let m = require('moment-timezone')  
+
+  /**
+   * Initialise tokens object if not defined yet
+   */
+  if (state.tokens == undefined) {
+    state.tokens = []
+  }
+  /**
+   * Initialise users object if not defined yet
+   */
+  if (state.users == undefined) {
+    state.users = []
+  }
+  
+  /**
+   * Initialise transaction number and transaction log
+   */
+  state.trxid = state.trxid || 1000000000
+  if (state.transactions == undefined) {
+    state.transactions = []
+  }
+
+  /**
+   * log type of API call and 'Authorization' header 
+   */
+  logger.info('Credit wallet called')
+  logger.info('Authorization:', request.headers['Authorization'])
+
+  /**
+   * Parse request body
+   */
+  let requestBody = JSON.parse(request.body)
+  logger.info('Body: ', JSON.stringify(requestBody, 2))
+  let credit = requestBody.data.credits[0]
+
+  /**
+   * Extract the token used as the last word in the 'Authorization'. 
+   * This can handle a string with or without the 'Bearer' in front of it.
+   */
+  let sessionToken = request.headers['Authorization'].split(" ").slice(-1)[0]
+
+  /**
+   * Extract user id and reference id
+   */
+  let userid = request.path.split("/")[5]
+  logger.info("Userid: ", userid)
+  let ref_id = request.headers['X-Request-ID']
+  logger.info("Reference ID: ", ref_id)
+
+  /**
+   * Extract wallet debit trans id
+   */
+  let debitTransId = request.path.split("/")[8]
+  logger.info("Debit Trans ID: ", debitTransId)
+
+  /**
+   * Log session token
+   */
+  logger.info('Session token: ', sessionToken)
+
+  /**
+   * Test if session token is valid
+   */
+  if (state.users[sessionToken] == undefined) {
+    logger.info('Invalid session token')
+    return (genCreditError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: 'Authorization='+sessionToken }))
+  }
+
+  /**
+   * Test if the X-Request-ID was used for a different transaction type
+   */
+  let trx = state.transactions[ref_id]
+  if (trx) {
+    if (trx.trxtype == 'CREDIT' && trx.game_id == credit.game.id && trx.provider_id == credit.game.provider.id && trx.amount == credit.amount) {
+      logger.info('Idempotent credit invocation for reference id: ', ref_id)
+      logger.info('Transaction: ', JSON.stringify(trx))
+      return genCreditResponse(trx.trans_id, trx.amount, trx.balance)
+    } else {
+      logger.info('Invalid request parameter: reference id already used and data do not match')
+      logger.info('Transaction: ', JSON.stringify(trx))
+      return (genCreditError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: 'X-Request-ID='+ref_id }))
+    }
+  }
+
+  /**
+   * Test if the debit transaction id is valid and points to a valid 'DEBIT' transaction
+   */
+  trx = state.transactions[debitTransId]
+  if (trx == undefined || trx.trxtype != 'DEBIT') {
+    logger.info('Invalid request parameter: debit transaction id points to a non-DEBIT transaction')
+    return (genCreditError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: debitTransId }))
+  }
+
+  /**
+   * Test if the debit transaction for the debit transaction id has not been processed yet, that is, trx.match_ref_id is not defined
+   */
+  if (trx.match_ref_id) {
+    let status = ((state.transactions[trx.match_ref_id].trxtype == 'CREDIT') ? 'paid' : 'cancelled')
+    logger.info('Invalid request parameter: debit transaction id points to a DEBIT transaction that has been ' + status + ' already')
+    logger.info('Debit transaction ' + status + ': ', JSON.stringify(trx))
+    return (genCreditError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: debitTransId }))
+  }
+
+  /**
+   * Assign this credit reference id to the matching reference id of the debit transaction
+   */
+  trx.match_ref_id = ref_id
+
+  /**
+   * Credit wallet balance
+   */
+  state.users[sessionToken].balance = Math.round((state.users[sessionToken].balance + credit.amount) * 100)/100
+   
+  /**
+   * Log transaction
+   */
+  state.transactions[ref_id] = state.transactions[state.trxid] = {
+    reference_id: ref_id,
+    trans_id: state.trxid++,
+    user_id: state.users[sessionToken].id,
+    game_id: credit.game.id,
+    provider_id: credit.game.provider.id,
+    amount: credit.amount,
+    balance: state.users[sessionToken].balance,
+    trxtype: 'CREDIT',
+    debit_ref_id: trx.reference_id,
+    debit_trans_id: trx.trans_id
+  } 
+  logger.info('Transaction: ', JSON.stringify(state.transactions[ref_id],2)) 
+
+  /**
+   * Generate mock response
+   */
+  trx = state.transactions[ref_id]
+  return genCreditResponse(trx.trans_id, trx.amount, trx.balance)
+}

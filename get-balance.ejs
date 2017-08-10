@@ -1,0 +1,123 @@
+/**
+ * Response for get balance request
+ * --------------------------------
+ * flpc:2017.08.07
+ */
+function(request, state, logger) {
+
+  /**
+   * Generate get balance response
+   */
+  function genBalanceResponse(user, adduser) {
+    /**
+     * Generate mock response
+     */
+    let body = {
+      'data': {
+        'wallets': [
+          {
+            'balance': user.balance
+          }
+        ]
+      }
+    }
+
+    /**
+     * Add user details if requested
+     */
+    if (adduser) {
+      body.data.wallets[0].user = {
+        'id': user.id,
+        'name': user.firstname,
+        'location': user.city
+      }
+    }
+
+    /**
+     * Log response
+     */
+    logger.info('Response: ', JSON.stringify(body, 2))
+
+    /**
+     * Return response
+     */
+    return {
+      statusCode: 200,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * load faker package
+   */
+  let faker = require('faker')
+
+  /**
+   * log type of API call and 'Authorization' header 
+   */
+  logger.info('Get wallet balance called')
+  logger.info('Authorization:', request.headers['Authorization'])
+
+  /**
+   * Initialise tokens object if not defined yet
+   */
+  if (state.tokens == undefined) {
+    state.tokens = []
+  }
+  /**
+   * Initialise users object if not defined yet
+   */
+  if (state.users == undefined) {
+    state.users = []
+  }
+
+  /**
+   * Extract the token used as the last word in the 'Authorization'. 
+   * This can handle a string with or without the 'Bearer' in front of it.
+   */
+  let sessionToken = request.headers['Authorization'].split(" ").slice(-1)[0]
+
+  /**
+   * Extract user id
+   */
+  let userid = request.path.split("/")[5]
+  logger.info("Userid: ", userid)
+
+  /**
+   * If the state.users object is not defined yet or the session token has no associated
+   * entry in the state.users object, then create a dummy entry in state.users
+   */
+  if (state.users == undefined || state.users[sessionToken] == undefined) {
+    /**
+     * Generate user object:
+     * - user id from URI
+     * - random firstname
+     * - random city
+     * - balance between 200 and 800
+     */
+    state.users[sessionToken] = { 
+      id: userid, 
+      firstname: faker.fake("{{name.firstName}}"), 
+      city: faker.fake("{{address.city}}"),
+      balance: Math.round((Math.random() * 800 + 200)*100)/100
+    }
+    logger.info("New user created: ", JSON.stringify(state.users[sessionToken], 2))
+  } else {
+    logger.info("User found: ", JSON.stringify(state.users[sessionToken], 2))
+  }
+
+  /**
+   * Log session token
+   */
+  logger.info('Session token: ', sessionToken)
+
+  /**
+   * Generate mock response
+   */
+  return genBalanceResponse(state.users[sessionToken], (request.query['include'] == 'user'))
+}

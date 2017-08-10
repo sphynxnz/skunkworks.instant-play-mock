@@ -1,0 +1,101 @@
+/**
+ *  Response for verify token request
+ * --------------------------------------------
+ * flpc:2017.08.07
+ */
+function(request, state, logger) {
+
+  /**
+   * Utility function to generate error response
+   */
+  function genVerifyError (status, code, title, detail, source) {
+    let body = {
+      'errors': [ 
+        {
+          'code': code,
+          'title': title,
+          'detail': detail,
+          'source': source
+        }
+      ]
+    }
+
+    logger.info('Error: ', JSON.stringify(body))
+
+    return {
+      statusCode: status,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * Log type of call, path and query
+   */
+  logger.info('Verify single use token called')
+
+  /**
+   * Extract single use token as last URI parameter
+   */
+  let singleUseToken = request.path.split("/").slice(-1)[0]
+  logger.info('Single use token:', singleUseToken)
+
+  /**
+   * If state.tokens is not defined yet or the single use token is not found,
+   * the return error
+   */
+  if (state.tokens == undefined || state.tokens[singleUseToken] == undefined) {
+    logger.info('Token not found')
+    let qinclude = request.query['include']
+    return (genVerifyError(404, 108, 'Error ssoToken not valid', request.method+' ' +request.path+(qinclude ? '?include='+qinclude : ''), { parameter: singleUseToken }))
+  }
+
+  /**
+   * Single use token found
+   */
+  logger.info('Single use token found')
+  logger.info('Session token: ', state.tokens[singleUseToken])
+
+  /**
+   * Create response object
+   */
+  let tokenData = {
+    'id': state.tokens[singleUseToken]
+  }
+
+  /**
+   * Add user id data if included in query
+   */
+  if (request.query['include'] == 'user.id') {
+    tokenData.user = { id: state.users[state.tokens[singleUseToken]].id }
+    logger.info('Userid: ', tokenData.user.id)
+  }
+
+  /**
+   * Delete single use token
+   */
+  delete state.tokens[singleUseToken]
+  
+  /**
+   * Generate mock response
+   */
+	return {
+     statusCode: 200,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': {
+      	'data': {
+      		'tokenreferences': [
+      			tokenData
+      		]
+      	}
+      }
+	}
+}

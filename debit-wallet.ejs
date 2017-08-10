@@ -1,0 +1,197 @@
+/**
+ * Response for debit wallet request
+ * ---------------------------------
+ * flpc:2017.08.07
+ */
+function(request, state, logger) {
+
+  /**
+   * Utility function to generate error response
+   */
+  function genDebitError (status, code, title, detail, source) {
+    let body = {
+      'errors': [ 
+        {
+          'code': code,
+          'title': title,
+          'detail': detail,
+          'source': source
+        }
+      ]
+    }
+
+    logger.info('Errors: ', JSON.stringify(body))
+
+    return {
+      statusCode: status,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+
+  /**
+   * Generate debit response
+   */
+  function genDebitResponse(trxid, amount, balance) {
+    let body = {
+      'data': {
+        'debits': [
+          {
+            'id': trxid,
+            'amount': amount,
+            'date': m().format(),
+            'wallet': {
+              'balance': balance
+            }
+          }
+        ]
+      }
+    } 
+    logger.info('Response: ', JSON.stringify(body, 2))
+    return {
+      statusCode: 201,
+      headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+      },
+      'body': body
+    }
+  }
+  
+  /**
+   * load faker package
+   */
+  let faker = require('faker')
+
+  /**
+   * load moment-timezone package
+   */
+  let m = require('moment-timezone')  
+
+  /**
+   * Initialise tokens object if not defined yet
+   */
+  if (state.tokens == undefined) {
+    state.tokens = []
+  }
+  /**
+   * Initialise users object if not defined yet
+   */
+  if (state.users == undefined) {
+    state.users = []
+  }
+
+  /**
+   * Initialise transaction number and transaction log
+   */
+  state.trxid = state.trxid || 1000000000
+  if (state.transactions == undefined) {
+    state.transactions = []
+  }
+
+  /**
+   * log type of API call and 'Authorization' header 
+   */
+  logger.info('Debit wallet called')
+  logger.info('Authorization:', request.headers['Authorization'])
+
+  /**
+   * Parse request body
+   */
+  let requestBody = JSON.parse(request.body)
+  let debit = requestBody.data.debits[0]
+  logger.info('Body: ', JSON.stringify(requestBody, 2))
+
+  /**
+   * Extract the token used as the last word in the 'Authorization'. 
+   * This can handle a string with or without the 'Bearer' in front of it.
+   */
+  let sessionToken = request.headers['Authorization'].split(" ").slice(-1)[0]
+
+  /**
+   * Extract user id and reference id
+   */
+  let userid = request.path.split("/")[5]
+  logger.info("Userid: ", userid)
+  let ref_id = request.headers['X-Request-ID']
+  logger.info("Reference ID: ", ref_id)
+
+  /**
+   * If the state.users object is not defined yet or the session token has no associated
+   * entry in the state.users object, then create a dummy entry in state.users
+   */
+  if (state.users == undefined || state.users[sessionToken] == undefined) {
+    /**
+     * Generate user object:
+     * - userid from URI
+     * - random firstname
+     * - random city
+     * - balance between 200 and 800
+     */
+    state.users[sessionToken] = { 
+      id: userid, 
+      firstname: faker.fake("{{name.firstName}}"), 
+      city: faker.fake("{{address.city}}"),
+      balance: Math.round((Math.random() * 800 + 200)*100)/100
+    }
+    logger.info("New user created: ", JSON.stringify(state.users[sessionToken], 2))
+  } else {
+    logger.info("User found: ", JSON.stringify(state.users[sessionToken], 2))
+  }
+
+  /**
+   * Log session token
+   */
+  logger.info('Session token: ', sessionToken)
+
+  /**
+   * Test if the X-Request-ID was used for a different transaction type
+   */
+  let trx = state.transactions[ref_id]
+  if (trx) {
+    if (trx.trxtype == 'DEBIT' && trx.game_id == debit.game.id && trx.provider_id == debit.game.provider.id && trx.amount == debit.amount) {
+      logger.info('Idempotent debit invocation for reference id: ', ref_id)
+      logger.info('Transaction: ', JSON.stringify(trx))      
+      return genDebitResponse(trx.trans_id, trx.amount, trx.balance)
+    } else {
+      logger.info('Invalid request parameter: reference id already used and data do not match')
+      return (genDebitError(400, 200, 'Invalid request parameter', request.method+' '+request.path, { parameter: 'X-Request-ID='+ref_id } ))
+    }
+  }
+
+  /**
+   * Test if there is enough balance in wallet
+   */
+  if (state.users[sessionToken].balance < debit.amount) {
+    logger.info('Not enough balance in wallet')
+    return (genDebitError(402, 317, 'Insufficient wallet funds', request.method+' '+request.path, { pointer: 'body.data.debits[0].amount' }))
+  } else {
+    state.users[sessionToken].balance = Math.round((state.users[sessionToken].balance - debit.amount) * 100)/100
+  }
+
+  /**
+   * Log transaction
+   */
+  state.transactions[ref_id] = state.transactions[state.trxid] = {
+    reference_id: ref_id,
+    trans_id: state.trxid++,
+    user_id: state.users[sessionToken].id,
+    game_id: debit.game.id,
+    provider_id: debit.game.provider.id,
+    amount: debit.amount,
+    balance: state.users[sessionToken].balance,
+    trxtype: 'DEBIT'
+  } 
+  logger.info('Transaction: ', JSON.stringify(state.transactions[ref_id],2)) 
+
+  /**
+   * Generate mock response
+   */
+  trx = state.transactions[ref_id]
+  return genDebitResponse(trx.trans_id, trx.amount, trx.balance)
+}

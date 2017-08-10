@@ -1,0 +1,111 @@
+/**
+ * Response for generate token request
+ * -----------------------------------
+ * flpc:2017.08.07
+ */
+function(request, state, logger) {
+  /**
+   * load uuid package
+   */
+  let uuidv4 = require('uuid')
+
+  /**
+   * load randomstring package
+   */
+  let randomstring = require('randomstring')
+
+  /**
+   * load faker package
+   */
+  let faker = require('faker')
+
+  /**
+   * log type of API call and 'Authorization' header 
+   */
+  logger.info('Generate single use token called')
+  logger.info('Authorization:', request.headers['Authorization'])
+
+  /**
+   * Initialise tokens object if not defined yet
+   */
+  if (state.tokens == undefined) {
+    state.tokens = []
+  }
+  /**
+   * Initialise users object if not defined yet
+   */
+  if (state.users == undefined) {
+    state.users = []
+  }
+
+  /**
+   * Generate uuid v4 token as single use token
+   */
+  let uuid = uuidv4()
+
+  /**
+   * Extract the token used as the last word in the 'Authorization'. 
+   * This can handle a string with or without the 'Bearer' in front of it.
+   */
+  let sessionToken = request.headers['Authorization'].split(" ").slice(-1)[0]
+
+  /**
+   * If the token is a JWT (i.e. length > 36), then replace it with a uuid v4 token
+   */
+  if (sessionToken.length > 36) {
+    sessionToken = uuidv4()
+  }
+
+  /**
+   * If the state.users object is not defined yet or the generated session token has no
+   * associated entry in the state.users object, then create a dummy entry in state.users
+   */
+  if (state.users == undefined || state.users[sessionToken] == undefined) {
+    /**
+     * Generate user object:
+     * - 9-digit random string as user id
+     * - random firstname
+     * - random city
+     * - balance between 200 and 800
+     */
+    state.users[sessionToken] = { 
+      id: randomstring.generate({ length: 9, charset: 'numeric' }), 
+      firstname: faker.fake("{{name.firstName}}"), 
+      city: faker.fake("{{address.city}}"),
+      balance: Math.round((Math.random() * 800 + 200)*100)/100
+    }
+    logger.info("New user created: ", JSON.stringify(state.users[sessionToken], 2))
+  }
+
+  /**
+   * Save session token associated with single use token
+   */
+  state.tokens[uuid] = sessionToken
+
+  /**
+   * Log session and single use tokens
+   */
+  logger.info('Session token: ', state.tokens[uuid])
+  logger.info('Single use token: ', uuid)
+
+  /**
+   * Generate mock response
+   */
+	return {
+    statusCode: 201,
+    headers: {
+        'content-type': 'application/json charset=utf-8',
+        'Date': new Date().toGMTString(),
+        'Access-Control-Allow-Origin': 'https://new2.cat.mylotto.co.nz'
+    },
+    'body': {
+      'data': {
+        'tokenreferences': [
+          {
+            'id': uuid
+          }
+        ]
+      }
+    }
+	}
+}
