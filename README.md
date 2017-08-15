@@ -1,4 +1,4 @@
-# Instant Play Mock Servie
+# Instant Play Mock Service
 
 ## Overview
 This is the mock for **_instant play service_** used by IGT to do performance testing of the IGT Connect interface to the Lotto NZ EBO API service endpoints which include the following:
