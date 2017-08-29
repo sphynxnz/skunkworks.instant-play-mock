@@ -66,13 +66,13 @@ function(request, state, logger) {
      * - 9-digit random string as user id
      * - random firstname
      * - random city
-     * - balance between 200 and 800
+     * - balance between 200 and 500
      */
     state.users[sessionToken] = { 
-      id: randomstring.generate({ length: 9, charset: 'numeric' }), 
+      id: randomstring.generate({ length: 9, charset: 'numeric' }).toString(), 
       firstname: faker.fake("{{name.firstName}}"), 
       city: faker.fake("{{address.city}}"),
-      balance: Math.round((Math.random() * 800 + 200)*100)/100
+      balance: Math.round((Math.random() * 300 + 200)*100)/100
     }
     logger.info("New user created: ", JSON.stringify(state.users[sessionToken], 2))
   }
@@ -100,7 +100,7 @@ function(request, state, logger) {
     },
     'body': {
       'data': {
-        'tokenreferences': [
+        'tokenReferences': [
           {
             'id': uuid
           }

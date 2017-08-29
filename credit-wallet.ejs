@@ -40,7 +40,7 @@ function(request, state, logger) {
       'data': {
         'credits': [
           {
-            'id': trxid,
+            'id': trxid.toString(),
             'amount': amount,
             'date': m().format(),
             'wallet': {

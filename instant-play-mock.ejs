@@ -199,7 +199,22 @@
           "inject": "<%- stringify(filename, 'rollback-debit.ejs') %>"
         }
       ]
-    }
+    },
+    {
+      "responses": [{
+        "is": {
+          "statusCode": 404,
+          "headers": {
+            "Content-Type": "application/json;charset=UTF-8"
+          },
+          "body": {
+            "statusCode": 404,
+            "error": " Not found",
+            "message": "Resource not found - check if URL is valid"
+          }
+        }
+      }]
+    }    
   ],
   "_links": {
     "self": {
